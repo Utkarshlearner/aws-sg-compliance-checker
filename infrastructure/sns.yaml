@@ -5,7 +5,7 @@ Parameters:
   EmailAddress:
     Type: String
     Description: Email address to subscribe to the SNS topic
-    Default: "awslearnergoals@gmail.com"
+    Default: ""
 
 Resources:
   AlertsTopic:
