@@ -1,0 +1,154 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: "Creating Lambda for aws-sg-compliance-checker"
+
+Parameters:
+  LambdaRoleName:
+    Type: String
+    Description: RoleName
+    Default: "SG-Compliance-LambdaRole"
+
+Resources:
+  LambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: SGComplianceChecker
+      Handler: index.lambda_handler
+      Role: !Sub arn:aws:iam::${AWS::AccountId}:role/${LambdaRoleName}
+      Runtime: python3.9
+      Timeout: 300
+      Tags:
+        - Key: Project
+          Value: aws-sg-compliance-checker
+        - Key: Environment
+          Value: Dev
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+          import logging
+          from botocore.exceptions import ClientError
+
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+
+          ssm = boto3.client('ssm')
+          sns = boto3.client('sns')
+          config = boto3.client('config')
+
+          SSM_PARAM_NAME = '/sns/AlertTopicArn'
+
+          def get_sns_topic_arn():
+              try:
+                  response = ssm.get_parameter(Name=SSM_PARAM_NAME)
+                  return response['Parameter']['Value']
+              except ClientError as e:
+                  logger.error(f"Error retrieving SNS topic ARN from SSM: {e}")
+                  raise
+
+          def send_sns_notification(topic_arn, subject, message):
+              try:
+                  response = sns.publish(
+                      TopicArn=topic_arn,
+                      Subject=subject,
+                      Message=message
+                  )
+                  logger.info(f"SNS notification sent: {response['MessageId']}")
+              except ClientError as e:
+                  logger.error(f"Error sending SNS message: {e}")
+                  raise
+
+          def evaluate_compliance(configuration_item):
+              if configuration_item['resourceType'] != 'AWS::EC2::SecurityGroup':
+                  return 'NOT_APPLICABLE', "Resource is not a Security Group."
+    
+              security_group = configuration_item.get('configuration', {})
+              group_id = configuration_item.get('resourceId', 'unknown')
+
+              if 'ipPermissions' in security_group:
+                  for permission in security_group['ipPermissions']:
+                      from_port = permission.get('fromPort')
+                      to_port = permission.get('toPort')
+                      ip_ranges = permission.get('ipRanges', [])
+
+                      for ip_range in ip_ranges:
+                          if isinstance(ip_range, dict):
+                              cidr = ip_range.get('cidrIp')
+                          elif isinstance(ip_range, str):
+                              cidr = ip_range
+                          else:
+                              cidr = None
+
+                          if cidr == '0.0.0.0/0':
+                              if from_port in [22, 3389] or (from_port is None and to_port is None):
+                                  message = (
+                                      f"Security Group {group_id} allows inbound access from 0.0.0.0/0 "
+                                      f"on port {from_port}."
+                                  )
+                                  return 'NON_COMPLIANT', message
+
+              return 'COMPLIANT', "Security Group is compliant."
+
+          def lambda_handler(event, context):
+              try:
+                  logger.info("Received event: " + json.dumps(event))
+
+                  invoking_event = json.loads(event['invokingEvent'])
+                  configuration_item = invoking_event['configurationItem']
+                  result_token = event['resultToken']
+
+                  compliance_type, annotation = evaluate_compliance(configuration_item)
+
+                  if compliance_type == 'NON_COMPLIANT':
+                      sns_topic_arn = get_sns_topic_arn()
+                      send_sns_notification(
+                          topic_arn=sns_topic_arn,
+                          subject="NON-COMPLIANT Security Group Detected",
+                          message=annotation
+                   )
+
+                    # Report back to AWS Config
+                  config.put_evaluations(
+                        Evaluations=[
+                            {
+                                'ComplianceResourceType': configuration_item['resourceType'],
+                                'ComplianceResourceId': configuration_item['resourceId'],
+                                'ComplianceType': compliance_type,
+                                'Annotation': annotation,
+                                'OrderingTimestamp': configuration_item['configurationItemCaptureTime']
+                            }
+                        ],
+                        ResultToken=result_token
+                  )
+
+                  return {
+                      'compliance_type': compliance_type,
+                      'annotation': annotation
+                  }
+
+              except Exception as e:
+                  logger.error(f"Unhandled exception: {str(e)}")
+                  raise
+
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/lambda/SGComplianceChecker
+      RetentionInDays: 3
+      Tags:
+        - Key: Project
+          Value: aws-sg-compliance-checker
+        - Key: Environment
+          Value: Dev
+
+  LambdaInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt LambdaFunction.Arn
+      Action: lambda:InvokeFunction
+      Principal: config.amazonaws.com
+
+Outputs:
+  LambdaFunctionArn:
+    Value: !GetAtt LambdaFunction.Arn
+    Export:
+      Name: LambdaFunctionArn

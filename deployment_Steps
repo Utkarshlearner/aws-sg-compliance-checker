@@ -1,0 +1,21 @@
+🚀 Deployment Steps
+Make sure the AWS CLI is configured (aws configure) before running these commands.
+
+1) Create IAM Role
+aws cloudformation create-stack --stack-name SG-Compliance-IAM-Stack --template-body file://iam.yaml --capabilities CAPABILITY_NAMED_IAM
+
+
+2) Create SNS 
+aws cloudformation create-stack --stack-name SG-Compliance-SNS-Stack --template-body file://sns.yaml --capabilities CAPABILITY_NAMED_IAM
+
+
+3) Create Lambda
+aws cloudformation create-stack --stack-name SG-Compliance-Lambda-Stack --template-body file://lambda.yaml --capabilities CAPABILITY_NAMED_IAM
+
+
+4)  Create Config Rules
+aws cloudformation create-stack --stack-name SG-Compliance-ConfigRules-Stack --template-body file://configrules.yaml --capabilities CAPABILITY_NAMED_IAM
+
+
+
+

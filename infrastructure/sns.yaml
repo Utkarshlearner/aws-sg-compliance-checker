@@ -1,0 +1,46 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: "Creating SNS for aws-sg-compliance-checker"
+
+Parameters:
+  EmailAddress:
+    Type: String
+    Description: Email address to subscribe to the SNS topic
+    Default: "awslearnergoals@gmail.com"
+
+Resources:
+  AlertsTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: sgcompliancealerts
+      Tags:
+        - Key: Project
+          Value: aws-sg-compliance-checker
+        - Key: Environment
+          Value: Dev
+
+  AlertsSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      Protocol: email
+      Endpoint: !Ref EmailAddress
+      TopicArn: !Ref AlertsTopic
+
+  AlertSnsArnParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: /sns/AlertTopicArn
+      Type: String
+      Value: !Ref AlertsTopic
+      Description: SNS topic ARN for aws-sg-compliance-checker
+      Tags:
+          Project: aws-sg-compliance-checker
+          Environment: Dev
+
+Outputs:
+  SnsTopicArn:
+    Description: The ARN of the SNS Topic
+    Value: !Ref AlertsTopic
+
+  SSMParameterName:
+    Description: The SSM parameter name where the SNS ARN is stored
+    Value: !Ref AlertSnsArnParameter

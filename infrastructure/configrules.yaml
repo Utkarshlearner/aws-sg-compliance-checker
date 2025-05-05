@@ -1,0 +1,32 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: "Creating AWS Config Rule for Security Group compliance to block 0.0.0.0/0 on sensitive ports"
+
+Parameters:
+  RuleName:
+    Type: String
+    Description: Name of the Config Rule
+    Default: "SG-Compliance-Checker-Rule"
+
+
+Resources:
+  SGComplianceConfigRule:
+    Type: AWS::Config::ConfigRule
+    Properties:
+      ConfigRuleName: !Ref RuleName
+      Description: Checks if EC2 Security Groups allow inbound access from 0.0.0.0/0 on ports 22, 3389
+      Scope:
+        ComplianceResourceTypes:
+          - AWS::EC2::SecurityGroup
+      Source:
+        Owner: CUSTOM_LAMBDA
+        SourceIdentifier: !ImportValue LambdaFunctionArn
+        SourceDetails:
+          - EventSource: aws.config
+            MessageType: ConfigurationItemChangeNotification
+
+Outputs:
+  SecurityGroupComplianceRule:
+    Description: AWS Config Rule for Security Group compliance
+    Value: !Ref SGComplianceConfigRule
+    Export:
+      Name: SGComplianceRuleName
